@@ -159,7 +159,7 @@ rule set_chewbbaca_time_start:
             fh.write(str(time.time()))
 
 CHEWB_SCRIPT = os.path.realpath(
-    os.path.join(os.path.dirname(workflow.snakefile), "chewBBACA/CHEWBBACA/chewBBACA.py")
+    os.path.join(os.path.dirname(workflow.snakefile), "../chewBBACA/CHEWBBACA/chewBBACA.py")
 )
 
 rule_name = "run_chewbbaca_on_genome"
