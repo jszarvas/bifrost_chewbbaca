@@ -32,11 +32,7 @@ def rule__blast_locuscall(input: object, output: object, params: object, log: ob
         
         print(f"species detection {species_detection}\n")
         print(f"detected species {detected_species}\n\n")
-        print(f"testing config file {Path(params.chewbbaca_blastdb)}\n")
         print(f"component 1 {component['options']['chewbbaca_species_mapping']}\n")
-        print(f"component params {params.chewbbaca_blastdb}\n\n")
-        print(f"check test 2 {component['options']['chewbbaca_species_mapping']['blastdb']}\n\n")
-        print(f"used database {component['options']['chewbbaca_species_mapping']['blastdb'][detected_species]}\n\n")
 
         os.makedirs(output.locus_call_results, exist_ok=True)
         process_single_assembly(
