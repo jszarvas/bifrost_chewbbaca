@@ -46,6 +46,84 @@ def has_internal_stop(seq: str) -> bool:
 def reverse_complement(seq: str) -> str:
     return str(Seq(seq).reverse_complement())
 
+def only_start_codon_diff(query_seq: str, allele_seq: str) -> bool:
+    if not query_seq or not allele_seq:
+        return False
+
+    query_seq = query_seq.upper()
+    allele_seq = allele_seq.upper()
+
+    return (
+        len(query_seq) == len(allele_seq)
+        and query_seq[3:] == allele_seq[3:]
+        and query_seq[:3] in START_CODONS
+        and allele_seq[:3] in START_CODONS
+        and query_seq[:3] != allele_seq[:3]
+    )
+
+
+def allele_containment_case(query_seq: str, allele_seq: str) -> str:
+    if not query_seq or not allele_seq:
+        return ""
+
+    query_seq = query_seq.upper()
+    allele_seq = allele_seq.upper()
+
+    if query_seq == allele_seq:
+        return "exact"
+
+    if query_seq in allele_seq:
+        return "query_is_subsequence"
+
+    if allele_seq in query_seq:
+        return "allele_is_subsequence"
+
+    return ""
+
+
+def start_region_subsequence_case(query_seq: str, allele_seq: str) -> bool:
+    """
+    True only when query_seq is a suffix of allele_seq and the missing
+    part from allele_seq is limited to the first codon.
+    """
+    if not query_seq or not allele_seq:
+        return False
+
+    query_seq = query_seq.upper()
+    allele_seq = allele_seq.upper()
+
+    if query_seq == allele_seq:
+        return False
+
+    if not allele_seq.endswith(query_seq):
+        return False
+
+    missing = len(allele_seq) - len(query_seq)
+
+    return (
+        missing == 3
+        and allele_seq[:3] in START_CODONS
+    )
+
+
+def allele_is_start_region_extension(query_seq: str, allele_seq: str) -> bool:
+    if not query_seq or not allele_seq:
+        return False
+
+    query_seq = query_seq.upper()
+    allele_seq = allele_seq.upper()
+
+    if not query_seq.endswith(allele_seq):
+        return False
+
+    extra = len(query_seq) - len(allele_seq)
+
+    return (
+        extra == 3
+        and query_seq[:3] in START_CODONS
+        and allele_seq[:3] in START_CODONS
+    )
+
 
 def orient_and_frame_fix(
     seq: str,
@@ -158,7 +236,7 @@ def extract_subsequences(genome: Fasta, alleles: list, max_stop_extend: int) -> 
     extracted = []
 
     for allele in alleles:
-        seq_id, qstart, qend, saccver, strand = allele
+        seq_id, qstart, qend, saccver, strand, allele_seq = allele
         header_raw = f">{seq_id}_{saccver}_{qstart+1}_{qend}"
 
         subseq = genome[seq_id][qstart:qend].seq
@@ -181,10 +259,68 @@ def extract_subsequences(genome: Fasta, alleles: list, max_stop_extend: int) -> 
                 print(f"[WARNING] {msg}", file=sys.stderr)
             continue
 
-        fixed, new_start, new_end, _stats = orient_and_frame_fix(
-            subseq, qstart, qend, genome, seq_id, header_raw, strand, max_stop_extend
-        )
+        fixed, new_start, new_end, stats = orient_and_frame_fix(
+            subseq, qstart, qend, genome, seq_id, header_raw, strand, max_stop_extend)
+
         if not fixed:
+            # already logged inside orient_and_frame_fix
+            continue
+        
+        if only_start_codon_diff(fixed, allele_seq):
+            msg = (
+                f"{header_raw}: differs from existing allele {saccver} only in the start codon; "
+                "using existing allele instead of adding novel allele."
+            )
+            print(f"[INFO] {msg}", file=sys.stderr)
+            warnings.warn(msg, RuntimeWarning)
+
+            final_hdr = f">{seq_id}_{saccver}_{new_start+1}_{new_end}"
+            extracted.append((final_hdr, allele_seq))
+            continue
+
+        case = allele_containment_case(fixed, allele_seq)
+
+        if case == "query_is_subsequence":
+            if start_region_subsequence_case(fixed, allele_seq):
+                msg = (
+                    f"{header_raw}: extracted sequence is a start-region subsequence of existing allele {saccver}; "
+                    "using existing allele instead of adding partial/start-shifted allele."
+                )
+                print(f"[INFO] {msg}", file=sys.stderr)
+                warnings.warn(msg, RuntimeWarning)
+
+                final_hdr = f">{seq_id}_{saccver}_{new_start+1}_{new_end}_existing"
+                extracted.append((final_hdr, allele_seq))
+                continue
+
+            msg = (
+                f"{header_raw}: extracted sequence is contained within existing allele {saccver}, "
+                "but more than the start region appears to be missing; skipping partial allele."
+            )
+            print(f"[INFO] {msg}", file=sys.stderr)
+            warnings.warn(msg, RuntimeWarning)
+            continue
+        
+
+        if case == "allele_is_subsequence":
+            if not allele_is_start_region_extension(fixed, allele_seq):
+                msg = (
+                    f"{header_raw}: existing allele {saccver} is contained within extracted sequence, "
+                    "but the extra sequence is not limited to the start region; skipping."
+                )
+                print(f"[INFO] {msg}", file=sys.stderr)
+                warnings.warn(msg, RuntimeWarning)
+                continue
+
+            msg = (
+                f"{header_raw}: existing allele {saccver} is contained within extracted start-region extension; "
+                "using existing allele instead of adding extended allele."
+            )
+            print(f"[INFO] {msg}", file=sys.stderr)
+            warnings.warn(msg, RuntimeWarning)
+
+            final_hdr = f">{seq_id}_{saccver}_{new_start+1}_{new_end}_existing"
+            extracted.append((final_hdr, allele_seq))
             continue
 
         if has_internal_stop(fixed):
@@ -204,7 +340,7 @@ def extract_subsequences(genome: Fasta, alleles: list, max_stop_extend: int) -> 
     return extracted
 
 
-def parse_blast_output(blast_output: str, genome: Fasta, min_cov_ratio: float) -> list:
+def parse_blast_output(blast_output: str, genome: Fasta, min_cov_ratio: float, scheme_locus: Fasta) -> list:
     perfect_hits = []
     fallback_strict = None
     fallback_strict_key = None
@@ -290,19 +426,16 @@ def parse_blast_output(blast_output: str, genome: Fasta, min_cov_ratio: float) -
             qend += (slen - end)
 
         qstart0 = max(0, qstart - 1)
-        contig_len = len(genome[hit["qaccver"]])
-        qend_incl = min(qend, contig_len)
-
-        if qend_incl <= qstart0:
-            msg = (
-                f"Invalid expanded coordinates for hit on contig {hit['qaccver']} "
-                f"(qstart0={qstart0}, qend_incl={qend_incl}); skipping."
-            )
+        qend_incl = min(qend, len(genome[hit['qaccver']]))
+        try:
+            allele_seq = scheme_locus[hit['saccver']][:].seq.upper()
+        except KeyError:
+            allele_seq = None
+            msg=(f"Could not find allele {hit['saccver']} in scheme locus FASTA.")
             warnings.warn(msg, RuntimeWarning)
             print(f"[WARNING] {msg}", file=sys.stderr)
-            continue
 
-        alleles.append((hit["qaccver"], qstart0, qend_incl, hit["saccver"], strand))
+        alleles.append((hit['qaccver'], qstart0, qend_incl, hit['saccver'], strand, allele_seq))
 
     return alleles
 
@@ -344,7 +477,9 @@ def run_blast_locus(
 
     alleles = []
     if os.path.exists(blast_output):
-        alleles = parse_blast_output(blast_output, genome, min_cov_ratio)
+        scheme_locus = Fasta(locus_path)
+        alleles = parse_blast_output(blast_output, genome, min_cov_ratio, scheme_locus)
+        scheme_locus.close()
         try:
             os.remove(blast_output)
         except OSError as e:
