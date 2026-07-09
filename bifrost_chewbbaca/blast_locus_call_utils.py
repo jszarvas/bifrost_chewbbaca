@@ -7,9 +7,10 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
 from datetime import datetime, timezone 
+import time
 
 from Bio.Seq import Seq
-from pyfaidx import Fasta
+from pyfaidx import Fasta, Faidx
 
 import tempfile
 
@@ -489,6 +490,64 @@ def run_blast_locus(
 
     return alleles
 
+def check_for_lock(
+    lock_file: Path,
+    wait_sec: int = 60,
+    stale_after_sec: int = 4*3600
+) -> None:
+    """
+    Respect the lock fx. chewbbaca_fbi places while it runs, to avoid blastn using partially written files.
+    """
+    schema_locked = True
+    while schema_locked:
+        if lock_file.exists():
+            # remove if too old
+            if stale_after_sec is not None:
+                try:
+                    age = time.time() - lock_file.stat().st_mtime
+                    if age > stale_after_sec:
+                        try:
+                            lock_file.unlink()
+                            print(f"Removed stale lock file {lock_file}, age {age:.0f} sec.", file = sys.stderr)
+                            schema_locked = False
+                        except FileNotFoundError:
+                            pass
+                except FileNotFoundError:
+                    pass
+            else:
+                # wait
+                time.sleep(wait_sec)
+        else:
+            schema_locked = False
+    return
+
+def index_loci_fasta(
+    loci_list: list,
+    schema_dir: Path
+) -> None:
+    """
+    Crate .fai if not exist or older than fasta
+    """
+    # avoid indexing same time as other processes
+    indexing_lock = schema_dir / "indexing_wait.lock"
+    check_for_lock(lock_file = indexing_lock, wait_sec = 20, stale_after_sec = 1*3600)
+    # no lock, place our own
+    with indexing_lock.open(mode='w') as fp:
+        print(f"{os.getpid()}", file = fp)
+    print(f"[INFO] Process {os.getpid()} locked schema dir for indexing", file = sys.stderr)
+
+    # index loci fasta as needed
+    _ = [Faidx(schema_dir / f, build_index = True) for f in loci_list]
+
+    try:
+        indexing_lock.unlink()
+        print(f"[INFO] Process {os.getpid()} removed lock", file = sys.stderr)
+    except FileNotFoundError:
+        print(f"[WARNING] Process {os.getpid()} could not remove lock", file = sys.stderr)
+        pass
+    
+    return
+
 
 def process_single_assembly(
     assembly_path: Path,
@@ -512,9 +571,17 @@ def process_single_assembly(
     except Exception as e:
         raise RuntimeError(f"Failed to open assembly FASTA with pyfaidx: {assembly_path}: {e}") from e
 
+    lock_path = schema_dir / "temp_check.lock"
+    check_for_lock(lock_file = lock_path)
+
     loci = [f for f in os.listdir(schema_dir) if f.endswith(".fasta")]
     if not loci:
         raise ValueError(f"No .fasta locus files found in scheme directory: {schema_dir}")
+
+    index_loci_fasta(
+        loci,
+        schema_dir
+    )
 
     all_alleles = []
     assembly_name = assembly_path.stem
