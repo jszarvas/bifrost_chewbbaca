@@ -1913,66 +1913,66 @@ def process_single_assembly(
         dir=LOCAL_CWD,
     ) as assembly_tmpdir:
         assembly_index = os.path.join(assembly_tmpdir, "assembly.fai")
-
-    try:
-        genome = Fasta(str(assembly_path), indexname=assembly_index)
-    except Exception as exc:
-        raise RuntimeError(
-            f"Failed to open assembly FASTA with pyfaidx: {assembly_path}: {exc}"
-        ) from exc
-
-    try:
-        all_alleles = []
-        all_decisions = []
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(
-                    run_blast_locus,
-                    assembly_path,
-                    schema_dir / locus,
-                    genome,
-                    assembly_name,
-                    min_cov_ratio,
-                    min_identity,
-                    region_overlap,
-                ): locus
-                for locus in loci
-            }
-
-            for future in as_completed(futures):
-                locus = futures[future]
-                try:
-                    locus_alleles, locus_decisions = future.result()
-                except Exception as exc:
-                    # By default: fatal (matches your new script)
-                    raise RuntimeError(
-                        f"Failed processing locus {locus} for assembly {assembly_path.name}: {exc}"
-                    ) from exc
-
-                all_alleles.extend(locus_alleles)
-                all_decisions.extend(locus_decisions)
-
-        extracted, extraction_decisions = extract_subsequences(
-            genome=genome,
-            alleles=all_alleles,
-            max_stop_extend=max_stop_extend,
-            assembly_name=assembly_name,
-        )
-        all_decisions.extend(extraction_decisions)
-
-        # Write only included candidates to the requested pipeline FASTA.
-        with output_file.open("w", encoding="utf-8") as out_fh:
-            for header, sequence in extracted:
-                out_fh.write(f"{header}\n{sequence}\n")
-
-        write_decision_stats(
-            str(stats_file),
-            assembly_name,
-            all_decisions,
-        )
-    finally:
-        genome.close()
+  
+        try:
+            genome = Fasta(str(assembly_path), indexname=assembly_index)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to open assembly FASTA with pyfaidx: {assembly_path}: {exc}"
+            ) from exc
+    
+        try:
+            all_alleles = []
+            all_decisions = []
+    
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(
+                        run_blast_locus,
+                        assembly_path,
+                        schema_dir / locus,
+                        genome,
+                        assembly_name,
+                        min_cov_ratio,
+                        min_identity,
+                        region_overlap,
+                    ): locus
+                    for locus in loci
+                }
+    
+                for future in as_completed(futures):
+                    locus = futures[future]
+                    try:
+                        locus_alleles, locus_decisions = future.result()
+                    except Exception as exc:
+                        # By default: fatal (matches your new script)
+                        raise RuntimeError(
+                            f"Failed processing locus {locus} for assembly {assembly_path.name}: {exc}"
+                        ) from exc
+    
+                    all_alleles.extend(locus_alleles)
+                    all_decisions.extend(locus_decisions)
+    
+            extracted, extraction_decisions = extract_subsequences(
+                genome=genome,
+                alleles=all_alleles,
+                max_stop_extend=max_stop_extend,
+                assembly_name=assembly_name,
+            )
+            all_decisions.extend(extraction_decisions)
+    
+            # Write only included candidates to the requested pipeline FASTA.
+            with output_file.open("w", encoding="utf-8") as out_fh:
+                for header, sequence in extracted:
+                    out_fh.write(f"{header}\n{sequence}\n")
+    
+            write_decision_stats(
+                str(stats_file),
+                assembly_name,
+                all_decisions,
+            )
+        finally:
+            genome.close()
 
     summary = (
         f"Wrote {len(extracted)} CDS candidates to {output_file}; "
