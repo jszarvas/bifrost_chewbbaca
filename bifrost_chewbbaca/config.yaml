@@ -69,7 +69,7 @@ requirements:
           data:
       species_detection:
         summary:
-          detected_species:
+          species:
 #---------------------------------------------------------------------------------------------------
 
 #-DB Value changes (excluding component output)-----------------------------------------------------
