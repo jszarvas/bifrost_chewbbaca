@@ -28,7 +28,7 @@ def rule__blast_locuscall(input: object, output: object, params: object, log: ob
         # Variables being used
         # resources_dir = component['resources']['schemes']
         species_detection = sample.get_category("species_detection")
-        detected_species = species_detection["summary"]["detected_species"]
+        detected_species = species_detection["summary"]["species"]
         
         print(f"species detection {species_detection}\n")
         print(f"detected species {detected_species}\n\n")

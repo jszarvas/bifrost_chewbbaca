@@ -44,7 +44,7 @@ try:
     species_sp = species.split()[0]
 
     # Determine species
-    detected_species = species_detection["summary"]["detected_species"]
+    detected_species = species_detection["summary"]["species"]
 
     # Mapping dictionary from component config
     schema_mapping = component["options"]["chewbbaca_species_mapping"]["schema"]
