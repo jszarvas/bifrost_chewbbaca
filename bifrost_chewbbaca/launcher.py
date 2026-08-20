@@ -146,7 +146,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             sample_var = f"sample_id={args.sample_id}"
         else:
             sample_var = f"sample_name={args.sample_name}"
-        command = f"cd {args.outdir}; snakemake --nolock --cores all -s {os.path.join(os.path.dirname(__file__),'pipeline.smk')} --config {sample_var} component_name={COMPONENT['name']}"
+        command = f"cd {args.outdir}; snakemake --nolock --rerun-incomplete --cores all -s {os.path.join(os.path.dirname(__file__),'pipeline.smk')} --config {sample_var} component_name={COMPONENT['name']}"
         print(command)
         process: subprocess.Popen = subprocess.Popen(
             command, stdout=sys.stdout, stderr=sys.stderr, shell=True
