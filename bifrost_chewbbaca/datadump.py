@@ -28,43 +28,44 @@ def schema_digest(locus_names, alg=md5):
     hash = alg("\t".join(locus_names).encode())
     return hash.hexdigest()
 
-def schema_name(component_name):
-    filename = Path(component_name, "chewbbaca_results", "schema")
+def schema_name(result_folder):
+    filename = Path(result_folder, "schema")
     with open(filename, 'r') as fh:
         return fh.read().strip()
 
-def extract_cgmlst(cgmlst: Category, results: Dict, component_name: str) -> None:
-    output_folder = Path(component_name, "chewbbaca_results", "output")
-    # chewbacca output gets thrown into a folder called results_<yearmonthday>someothertext
-    # chewbbaca_output_folder = [i for i in os.listdir(output_folder) if re.match("results_[0-9]{6}.*", i)][0]
+def extract_cgmlst(result_folder: str, cgmlst: Category, results: Dict, component_name: str) -> None:
+    output_folder = Path(result_folder, "output")
     file_name = output_folder / "results_alleles.tsv"
     file_key = common.json_key_cleaner(str(file_name))
     with open(file_name, encoding="utf-8") as input:
         lines = input.readlines()
         lines = [i.strip() for i in lines]
         locus_names = lines[0].split()[1:]
-        original_allele_values = [int(x) if x.isdigit() else x for x in lines[1].split()[1:]]
-        allele_values = [int(x.strip("INF-")) if x.strip("INF-").isdigit() else x for x in lines[1].split()[1:]]
+        if len(lines) == 1:
+            cgmlst["summary"]["call_percent"] = 0
+            cgmlst["summary"]["multiple_alleles"] = 0
+        else:
+            original_allele_values = [int(x) if x.isdigit() else x for x in lines[1].split()[1:]]
+            allele_values = [int(x.strip("INF-")) if x.strip("INF-").isdigit() else x for x in lines[1].split()[1:]]
 
-        allele_dict = {
-            locus_names[i]: original_allele_values[i] for i in range(len(locus_names))
-        }
-        new_alleles = {
-            locus: allele for locus, allele in allele_dict.items() if isinstance(allele, str) and allele.startswith("INF-")
+            allele_dict = {
+                locus_names[i]: original_allele_values[i] for i in range(len(locus_names))
             }
+            new_alleles = {
+                locus: allele for locus, allele in allele_dict.items() if isinstance(allele, str) and allele.startswith("INF-")
+                }
+            cgmlst["summary"]["call_percent"] = call_percent(allele_values)
+            cgmlst["summary"]["multiple_alleles"] = multiple_alleles(allele_values)
+            cgmlst["report"]["alleles"] = allele_dict
+            cgmlst["report"]["allele_array"] = allele_values
+            cgmlst["report"]["new_alleles"] = new_alleles
+            cgmlst["report"]["loci"] = locus_names
+            results[file_key] = allele_dict
 
-        cgmlst["summary"]["call_percent"] = call_percent(allele_values)
-        cgmlst["summary"]["multiple_alleles"] = multiple_alleles(allele_values)
-    results[file_key] = allele_dict
-    
-    cgmlst["report"]["schema"] = {"name": schema_name(component_name), "digest": schema_digest(locus_names)}
-    cgmlst["report"]["alleles"] = allele_dict
-    cgmlst["report"]["allele_array"] = allele_values
-    cgmlst["report"]["new_alleles"] = new_alleles
-    cgmlst["report"]["loci"] = locus_names
+    cgmlst["report"]["schema"] = {"name": schema_name(result_folder), "digest": schema_digest(locus_names)}
 
 
-def datadump(samplecomponent_ref_json: Dict):
+def datadump(samplecomponent_ref_json: Dict, result_folder: str):
     samplecomponent_ref = SampleComponentReference(value=samplecomponent_ref_json)
     samplecomponent = SampleComponent.load(samplecomponent_ref)
     sample = Sample.load(samplecomponent.sample)
@@ -89,7 +90,7 @@ def datadump(samplecomponent_ref_json: Dict):
             }
         )
     extract_cgmlst(
-        cgmlst, samplecomponent["results"], samplecomponent["component"]["name"]
+        result_folder, cgmlst, samplecomponent["results"], samplecomponent["component"]["name"]
     )
     samplecomponent.set_category(cgmlst)
     sample_category = sample.get_category("cgmlst")
@@ -102,13 +103,13 @@ def datadump(samplecomponent_ref_json: Dict):
         sample_category_version = extract_digits_from_component_version(
             sample_category["component"]["name"]
         )
-        print(current_category_version, sample_category_version)
+        #print(current_category_version, sample_category_version)
         if current_category_version >= sample_category_version:
             sample.set_category(cgmlst)
     common.set_status_and_save(sample, samplecomponent, "Success")
 
     with open(
-        os.path.join(samplecomponent["component"]["name"], "datadump_complete"),
+        os.path.join(os.path.dirname(result_folder), "datadump_complete"),
         "w+",
         encoding="utf-8",
     ) as fh:
@@ -124,4 +125,5 @@ def extract_digits_from_component_version(component_str):
 
 datadump(
     snakemake.params.samplecomponent_ref_json,
+    snakemake.input[0]
 )
