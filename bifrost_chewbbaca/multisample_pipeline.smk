@@ -85,7 +85,9 @@ try:
                 component_reference=component.to_reference()
             )
 
-        common.set_status_and_save(samples[sample_name], samplecomponents[sample_name], "Running")
+        # add samplecomponent and status if not compute-only
+        if config.get("compute_only", "no") == "no":
+            common.set_status_and_save(samples[sample_name], samplecomponents[sample_name], "Running")
     
 except Exception as error:
     print(traceback.format_exc(), file=sys.stderr)
@@ -101,14 +103,27 @@ envvars:
 
 JOB_CPUS = 4
 
+def get_selected_output():
+    results = []
+    if config.get("compute_only", "no") == "yes":
+        # compute only
+        git_hash = expand(f"{run_outputdir}/{{sample}}/{component['name']}/git_hash.txt", sample = config['samples'])
+        end_file = expand(f"{run_outputdir}/{{sample}}/{component['name']}/time_end.txt", sample = config['samples'])
+        results = git_hash + end_file
+    else:
+        # insert into mongoDB
+        results = expand(f"{run_outputdir}/{{sample}}/{component['name']}/datadump_complete", sample = config['samples'])
+    return results
+
 rule all:
     input:
-        expand(f"{run_outputdir}/{{sample}}/{component['name']}/datadump_complete", sample = config['samples'])
+        get_selected_output()
     params:
         input_samples = config['samples']
     run:
-        for sample_name in params.input_samples:
-            common.set_status_and_save(samples[sample_name], samplecomponents[sample_name], "Success")
+        if config.get("compute_only", "no") == "no":
+            for sample_name in params.input_samples:
+                common.set_status_and_save(samples[sample_name], samplecomponents[sample_name], "Success")
 
 rule set_time_start:
     output:
@@ -166,7 +181,7 @@ rule set_blast_time_end:
 
 rule set_chewbbaca_time_start:
     input:
-        rules.blast_locus_call.output.locus_call_done,
+        rules.set_blast_time_end.output.blast_end_file,
     output:
         chewbbaca_start_file = f"{run_outputdir}/{{sample}}/{component['name']}/chewbbaca_time_start.txt"
     run:
@@ -274,7 +289,7 @@ rule separate_chewbbaca_batch:
 
 rule set_time_end:
     input:
-        rules.run_chewbbaca_on_batch.output.chewbbaca_done
+        rules.separate_chewbbaca_batch.output.chewbbaca_done
     output:
         end_file = f"{run_outputdir}/{{sample}}/{component['name']}/time_end.txt"
     run:
